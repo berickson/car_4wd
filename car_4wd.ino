@@ -30,7 +30,7 @@ decode_results ir_results;
 
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   Serial.println("setup");
   // put your setup code here, to run once:
   pinMode(pin_mcc_ena, OUTPUT);
@@ -51,6 +51,7 @@ void setup() {
 
 
 void trace(String s) {
+  return;
   Serial.println(s);
 }
 
@@ -115,7 +116,45 @@ void stop() {
 }
 
 
+void remote_control() {
+  
+  while(true) {
+    if (Serial.available() > 0) {
+      int key = Serial.read();
+      switch(key) {
+        case 'F':       // forward
+          forward();
+          break;
+        case 'B':       // back
+          reverse();
+          break;
+        case 'L':       // left
+        case 'G':       // forward left
+        case 'H':       // back left
+          turn_left();
+          break;
+        case 'R':       // right
+        case 'I':       // forward right
+        case 'J':       // back right
+          turn_right();
+          break;
+          turn_left();
+          break;
+        case 'S':       // stop
+        case 'D':       // stop all
+          stop();
+          break;
+        default:
+          break;
+      }
+    }
+
+  }
+}
+
+
 void loop() {
+  remote_control();
   if (ir_rx.decode(&ir_results)) {
    Serial.print("received IR: ");
    Serial.println(ir_results.value, HEX);
