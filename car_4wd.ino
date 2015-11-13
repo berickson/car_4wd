@@ -28,6 +28,7 @@ const int pin_right_reverse = pin_mcc_in1;
 Servo servo;
 IRrecv ir_rx(pin_ir_rx);
 decode_results ir_results;
+int speed = 255; // 0-255
 
 
 void setup() {
@@ -93,9 +94,11 @@ void turn_right() {
 void forward() {
   trace("forward");
   servo_forward();
-  digitalWrite(pin_left_forward, HIGH);
+  //digitalWrite(pin_left_forward, HIGH);
+  analogWrite(pin_left_forward, speed);
   digitalWrite(pin_left_reverse, LOW);
-  digitalWrite(pin_right_forward, HIGH);
+  //digitalWrite(pin_right_forward, HIGH);
+  analogWrite(pin_right_forward, speed);
   digitalWrite(pin_right_reverse, LOW);
 }
 
@@ -144,6 +147,39 @@ void remote_control() {
         case 'S':       // stop
         case 'D':       // stop all
           stop();
+          break;
+        case '0':  // speeds, 0% - 90%
+          speed = (int) (255 * .0);
+          break;
+        case '1':
+          speed = (int) (255 * .1);
+          break;
+        case '2':
+          speed = (int) (255 * .2);
+          break;
+        case '3':
+          speed = (int) (255 * .3);
+          break;
+        case '4':
+          speed = (int) (255 * .4);
+          break;
+        case '5':
+          speed = (int) (255 * .5);
+          break;
+        case '6':
+          speed = (int) (255 * .6);
+          break;
+        case '7':
+          speed = (int) (255 * .7);
+          break;
+        case '8':
+          speed = (int) (255 * .8);
+          break;
+        case '9':
+          speed = (int) (255 * .9);
+          break;
+        case 'q': // full speed
+          speed = 255;
           break;
         default:
           break;
