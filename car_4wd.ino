@@ -4,19 +4,20 @@
 
 #include <Servo.h>
 
-const int pin_mcc_enb = 2;
-const int pin_mcc_in4 = 3;
-const int pin_mcc_in3 = 4;
-const int pin_mcc_in2 = 5;
-const int pin_mcc_in1 = 6;
-const int pin_mcc_ena = 7;
+const int pin_mcu_int = 2;
+const int pin_mcc_enb = 3;
+const int pin_mcc_in4 = 4;
+const int pin_mcc_in3 = 5;
+const int pin_mcc_in2 = 6;
+const int pin_mcc_in1 = 7;
+const int pin_mcc_ena = 8;
 
-const int pin_ping_echo = 8;
-const int pin_ping_trig = 9;
+const int pin_ping_echo = 9;
+const int pin_ping_trig = 10;
 
-const int pin_servo = 10;
+const int pin_servo = 11;
 
-const int pin_ir_rx = 11;
+const int pin_ir_rx = 12;
 
 const int pin_left_forward = pin_mcc_in4;
 const int pin_left_reverse = pin_mcc_in3;
