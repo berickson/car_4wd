@@ -37,6 +37,19 @@ int desired_heading = 0;
 char heading_command = 'S'; // stop all
 unsigned long last_loop_ms = 0;
 
+// using headlights command from car_rc app to turn MPU on and off
+bool front_lights_on = false;
+bool back_lights_on = false;
+bool horn_on = false;
+bool extra_on = false;
+#define use_mpu front_lights_on
+
+
+void set_speed() {
+  analogWrite(pin_mcc_ena, speed);
+  analogWrite(pin_mcc_enb, speed);
+
+}
 
 void setup() {
   Serial.begin(9600);
@@ -47,10 +60,9 @@ void setup() {
   pinMode(pin_mcc_in2, OUTPUT);
   pinMode(pin_mcc_in3, OUTPUT);
   pinMode(pin_mcc_in4, OUTPUT);
-  
-  digitalWrite(pin_mcc_ena, HIGH);
-  digitalWrite(pin_mcc_enb, HIGH);
 
+  set_speed();
+  
   servo.attach(pin_servo);
 
   mpu.setup();        // start mpu
@@ -98,30 +110,30 @@ void turn_right() {
 
 
 void forward() {
-  const double heading_tolerance = 300;
+  const double heading_tolerance = 3;
   trace("forward");
   servo_forward();
-  double heading_error = mpu.ground_angle() - desired_heading + 360;
-  while (heading_error > 180) {
-    heading_error -= 360;
+  double heading_error = 0;
+  if(use_mpu)  {
+    heading_error = mpu.ground_angle() - desired_heading + 360;
+    while (heading_error > 180) {
+      heading_error -= 360;
+    }
   }
 
   // too far to the right?
-  if(heading_error < -heading_tolerance) {
+  if(use_mpu && heading_error < -heading_tolerance) {
      digitalWrite(pin_left_forward, LOW);  // turn left by stalling left wheel
   } else {
-     //digitalWrite(pin_left_forward, HIGH);
-     analogWrite(pin_left_forward, speed);
+     digitalWrite(pin_left_forward, HIGH);
   }
-  //analogWrite(pin_left_forward, speed * (1-heading_error/15.));
   digitalWrite(pin_left_reverse, LOW);
 
   // too far to the left?
-  if(heading_error > heading_tolerance) {
+  if(use_mpu && heading_error > heading_tolerance) {
      digitalWrite(pin_right_forward, LOW); // turn right by stalling right wheel
   } else {
-     //digitalWrite(pin_right_forward, HIGH);
-     analogWrite(pin_right_forward, speed);
+     digitalWrite(pin_right_forward, HIGH);
   }
   digitalWrite(pin_right_reverse, LOW);
 }
@@ -174,36 +186,71 @@ void remote_control() {
         break;
       case '0':  // speeds, 0% - 90%
         speed = (int) (255 * .0);
+        set_speed();
         break;
       case '1':
         speed = (int) (255 * .1);
+        set_speed();
         break;
       case '2':
         speed = (int) (255 * .2);
+        set_speed();
         break;
       case '3':
         speed = (int) (255 * .3);
+        set_speed();
         break;
       case '4':
         speed = (int) (255 * .4);
+        set_speed();
         break;
       case '5':
         speed = (int) (255 * .5);
+        set_speed();
         break;
       case '6':
         speed = (int) (255 * .6);
+        set_speed();
         break;
       case '7':
         speed = (int) (255 * .7);
+        set_speed();
         break;
       case '8':
         speed = (int) (255 * .8);
+        set_speed();
         break;
       case '9':
         speed = (int) (255 * .9);
+        set_speed();
         break;
       case 'q': // full speed
         speed = 255;
+        set_speed();
+        break;
+      case 'W':
+        front_lights_on = true;
+        break;
+      case 'w':
+        front_lights_on = false;
+        break;
+      case 'U':
+        back_lights_on = true;
+        break;
+      case 'u':
+        back_lights_on = false;
+        break;
+      case 'V':
+        horn_on = true;
+        break;
+      case 'v':
+        horn_on = false;
+        break;
+      case 'X':
+        extra_on = true;
+        break;
+      case 'x':
+        extra_on = false;
         break;
       default:
         break;
@@ -246,13 +293,13 @@ void loop() {
   bool every_100_ms = every_n_ms(last_loop_ms, loop_ms, 100);
   bool every_10_ms = every_n_ms(last_loop_ms, loop_ms, 10);
 
-/*
-  if(every_100_ms) {
-    Serial.println(mpu.ground_angle());
+
+  if(use_mpu) { 
+    if(every_100_ms) {
+      Serial.println(mpu.ground_angle());
+    }
+    mpu.execute();
   }
-  //mpu.execute();
-  delay(1);
-*/
 
   if(every_10_ms) {
     remote_control();
