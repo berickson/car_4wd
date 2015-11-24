@@ -1,8 +1,6 @@
 // #include <IRremoteInt.h>
 #include <IRremote.h>
 #include <Servo.h>
-#include <I2Cdev.h>
-#include <Wire.h>
 
 const int pin_mcu_int = 2;
 const int pin_mcc_enb = 3;
@@ -24,15 +22,12 @@ const int pin_left_reverse = pin_mcc_in1;
 const int pin_right_forward = pin_mcc_in4;
 const int pin_right_reverse = pin_mcc_in3;
 
-#include "Mpu9150.h"
-
 
 // globals
 Servo servo;
 IRrecv ir_rx(pin_ir_rx);
 decode_results ir_results;
 int speed = 255; // 0-255
-Mpu9150 mpu;
 int desired_heading = 0;
 char heading_command = 'S'; // stop all
 unsigned long last_loop_ms = 0;
@@ -42,14 +37,13 @@ bool front_lights_on = false;
 bool back_lights_on = false;
 bool horn_on = false;
 bool extra_on = false;
-#define use_mpu front_lights_on
 
 
 void set_speed() {
   analogWrite(pin_mcc_ena, speed);
   analogWrite(pin_mcc_enb, speed);
-
 }
+
 
 void setup() {
   Serial.begin(9600);
@@ -60,32 +54,74 @@ void setup() {
   pinMode(pin_mcc_in2, OUTPUT);
   pinMode(pin_mcc_in3, OUTPUT);
   pinMode(pin_mcc_in4, OUTPUT);
+  pinMode(pin_ping_trig, OUTPUT);
+  pinMode(pin_ping_echo, INPUT);
 
   set_speed();
   
   servo.attach(pin_servo);
 
-  mpu.setup();        // start mpu
-  //ir_rx.enableIRIn(); // Start the receiver
-
+  ir_rx.enableIRIn(); // Start the receiver
 }
 
+// set servo to angle, zero is center, negative is ccw, range is -60 to 60
+void set_servo_angle(int degrees) {
+  const int center = 1350;
+  const int range = 900; // range from center to extreme
+  
+  servo.writeMicroseconds(
+    center + range* degrees / 90);
+}
 
 void trace(String s) {
-  return;
   Serial.println(s);
 }
 
 void servo_forward() {
-  servo.writeMicroseconds(1350);
+  set_servo_angle(0);
 }
 
 void servo_left() {
-  servo.writeMicroseconds(1700);
+  set_servo_angle(45);
 }
 
 void servo_right() {
-   servo.writeMicroseconds(900);
+   set_servo_angle(-45);
+}
+
+
+double ping_distance() {
+   digitalWrite(pin_ping_trig, LOW);
+   delayMicroseconds(2);
+   digitalWrite(pin_ping_trig, HIGH);
+   delayMicroseconds(10);
+   digitalWrite(pin_ping_trig, LOW);
+   unsigned long timeout_us = 60000;
+   double duration = pulseIn(pin_ping_echo, HIGH, timeout_us);
+   double distance = (duration/2) / 29.1/2.54;
+   trace((String)"ping distance: "+distance);
+   return distance;
+}
+
+void go_to_wall() {
+  set_servo_angle(0);
+  delay(60);
+  while(true) {
+    double distance = ping_distance();
+    
+    if (distance>18) { 
+      forward();
+    } else if (distance<16) {  
+      reverse();
+    }
+    else {
+      stop();
+      break;
+    }
+    delay(60); // go forward a little and also wait for ping to settle
+    coast();   // have to be coasting when we do the next ping because of noise
+    //delay(60); // go forward a little and also wait for ping to settle
+  }
 }
 
 
@@ -114,27 +150,11 @@ void forward() {
   trace("forward");
   servo_forward();
   double heading_error = 0;
-  if(use_mpu)  {
-    heading_error = mpu.ground_angle() - desired_heading + 360;
-    while (heading_error > 180) {
-      heading_error -= 360;
-    }
-  }
 
-  // too far to the right?
-  if(use_mpu && heading_error < -heading_tolerance) {
-     digitalWrite(pin_left_forward, LOW);  // turn left by stalling left wheel
-  } else {
-     digitalWrite(pin_left_forward, HIGH);
-  }
+  digitalWrite(pin_left_forward, HIGH);
   digitalWrite(pin_left_reverse, LOW);
 
-  // too far to the left?
-  if(use_mpu && heading_error > heading_tolerance) {
-     digitalWrite(pin_right_forward, LOW); // turn right by stalling right wheel
-  } else {
-     digitalWrite(pin_right_forward, HIGH);
-  }
+  digitalWrite(pin_right_forward, HIGH);
   digitalWrite(pin_right_reverse, LOW);
 }
 
@@ -155,16 +175,21 @@ void stop() {
   digitalWrite(pin_right_reverse, HIGH);
 }
 
+void coast() {
+  trace("coast");
+  digitalWrite(pin_left_forward, LOW);
+  digitalWrite(pin_left_reverse, LOW);
+  digitalWrite(pin_right_forward, LOW);
+  digitalWrite(pin_right_reverse, LOW);
+}
+
 
 void remote_control() {
   if (Serial.available() > 0) {
     int key = Serial.read();
     switch(key) {
       case 'F':       // forward
-        if(heading_command != key) {
-          desired_heading = mpu.ground_angle();
-          heading_command = key;
-        }
+        heading_command = key;
         break;
       case 'B':       // back
         heading_command = key;
@@ -229,6 +254,7 @@ void remote_control() {
         set_speed();
         break;
       case 'W':
+        go_to_wall();
         front_lights_on = true;
         break;
       case 'w':
@@ -289,27 +315,15 @@ bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long
 }
 
 void loop() {
+  go_to_wall();
+  return;
   unsigned long loop_ms = millis();
+  bool every_second = every_n_ms(last_loop_ms, loop_ms, 1000);
   bool every_100_ms = every_n_ms(last_loop_ms, loop_ms, 100);
   bool every_10_ms = every_n_ms(last_loop_ms, loop_ms, 10);
-
-
-  if(use_mpu) { 
-    if(every_100_ms) {
-      Serial.println(mpu.ground_angle());
-    }
-    mpu.execute();
-  }
 
   if(every_10_ms) {
     remote_control();
   }
-  /*
-  if (ir_rx.decode(&ir_results)) {
-   trace("received IR: ");
-   Serial.println(ir_results.value, HEX);
-   ir_rx.resume(); // Receive the next value
-  }
-  */
   last_loop_ms = loop_ms;
 }
