@@ -117,6 +117,8 @@ void go_to_wall() {
   set_servo_angle(0);
   delay(60);
   while(true) {
+    coast();
+    delay(60);
     double distance = ping_distance();
     
     if (distance>18) { 
