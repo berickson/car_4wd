@@ -96,10 +96,10 @@ double ping_distance() {
    digitalWrite(pin_ping_trig, HIGH);
    delayMicroseconds(10);
    digitalWrite(pin_ping_trig, LOW);
-   unsigned long timeout_us = 60000;
+   unsigned long timeout_us = 20000;
    double duration = pulseIn(pin_ping_echo, HIGH, timeout_us);
    double distance = (duration/2) / 29.1/2.54;
-   trace((String)"ping distance: "+distance);
+//   trace((String)"ping distance: "+distance);
    return distance;
 }
 
@@ -120,10 +120,64 @@ void go_to_wall() {
     }
     delay(60); // go forward a little and also wait for ping to settle
     coast();   // have to be coasting when we do the next ping because of noise
-    //delay(60); // go forward a little and also wait for ping to settle
   }
 }
 
+void turn_to_angle(double angle) {
+  double ms_per_degree = 3.0;
+  if(angle > 0)
+    turn_left();
+  if(angle < 0)
+    turn_right();
+  delay(abs(angle) * ms_per_degree);
+  stop();
+  delay(100);
+  coast();
+}
+
+
+bool scan_for_closest(double * min_angle, double * min_distance) {
+  trace("scanning for closest");
+  bool found = false;
+  for(double angle = 90; angle >= -90; angle -=15) {
+    set_servo_angle(angle);
+    delay(300);
+    double distance = ping_distance();
+    if((!found || (distance < *min_distance)) && distance > 0) {
+      found = true;
+      *min_distance = distance;
+      *min_angle = angle;
+    }
+  }
+  if(found) {
+    trace((String)"min_angle: " + *min_angle + "min_distance: " + *min_distance);
+  }
+  return found;
+}
+
+void go_inches(double inches) {
+  double ms_per_inch = 50;
+  if(inches > 0)
+    forward();
+  else
+    reverse();
+  delay(abs(inches) * ms_per_inch);
+  coast();
+}
+
+void follow_closest() {
+  delay(100);
+  coast();
+  double angle = 0;
+  double distance = 0;
+  double desired_distance = 5; // inches
+  if(scan_for_closest(&angle, &distance)) {
+    set_servo_angle(angle);
+    turn_to_angle(angle);
+    set_servo_angle(0);
+    go_inches(constrain(distance-desired_distance,-10,10));
+  }
+}
 
 
 void turn_left() {
@@ -184,7 +238,7 @@ void coast() {
 }
 
 
-void remote_control() {
+void read_remote_control() {
   if (Serial.available() > 0) {
     int key = Serial.read();
     switch(key) {
@@ -254,7 +308,6 @@ void remote_control() {
         set_speed();
         break;
       case 'W':
-        go_to_wall();
         front_lights_on = true;
         break;
       case 'w':
@@ -282,30 +335,32 @@ void remote_control() {
         break;
     }
   }
-
-  switch(heading_command) {
-  case 'F':       // forward
-    forward();
-    break;
-  case 'B':       // back
-    reverse();
-    break;
-  case 'L':       // left
-  case 'G':       // forward left
-  case 'H':       // back left
-    turn_left();
-    break;
-  case 'R':       // right
-  case 'I':       // forward right
-  case 'J':       // back right
-    turn_right();
-    break;
-  case 'S':       // stop
-  case 'D':       // stop all
-    stop();
-    break;
 }
 
+void follow_remote_control_commands() {
+  
+  switch(heading_command) {
+    case 'F':       // forward
+      forward();
+      break;
+    case 'B':       // back
+      reverse();
+      break;
+    case 'L':       // left
+    case 'G':       // forward left
+    case 'H':       // back left
+      turn_left();
+      break;
+    case 'R':       // right
+    case 'I':       // forward right
+    case 'J':       // back right
+      turn_right();
+      break;
+    case 'S':       // stop
+    case 'D':       // stop all
+      stop();
+      break;
+  }
 }
 
 // returns true if loop time passes through n ms boundary
@@ -315,15 +370,20 @@ bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long
 }
 
 void loop() {
-  go_to_wall();
-  return;
   unsigned long loop_ms = millis();
   bool every_second = every_n_ms(last_loop_ms, loop_ms, 1000);
   bool every_100_ms = every_n_ms(last_loop_ms, loop_ms, 100);
   bool every_10_ms = every_n_ms(last_loop_ms, loop_ms, 10);
 
+  read_remote_control();
   if(every_10_ms) {
-    remote_control();
+    read_remote_control();
+    if(front_lights_on) {
+      coast();
+      follow_closest();
+    } else {
+      follow_remote_control_commands();
+    }
   }
   last_loop_ms = loop_ms;
 }
