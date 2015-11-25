@@ -1,4 +1,3 @@
-// #include <IRremoteInt.h>
 #include <IRremote.h>
 #include <Servo.h>
 
@@ -39,6 +38,16 @@ bool horn_on = false;
 bool extra_on = false;
 
 
+// infrared receiver
+decode_results results;
+
+enum mode_enum {
+  mode_manual,
+  mode_follow_closest,
+  mode_go_to_wall
+} mode;
+
+
 void set_speed() {
   analogWrite(pin_mcc_ena, speed);
   analogWrite(pin_mcc_enb, speed);
@@ -74,6 +83,7 @@ void set_servo_angle(int degrees) {
 }
 
 void trace(String s) {
+  return;
   Serial.println(s);
 }
 
@@ -309,9 +319,11 @@ void read_remote_control() {
         break;
       case 'W':
         front_lights_on = true;
+        mode = mode_follow_closest;
         break;
       case 'w':
         front_lights_on = false;
+        mode = mode_manual;
         break;
       case 'U':
         back_lights_on = true;
@@ -363,6 +375,101 @@ void follow_remote_control_commands() {
   }
 }
 
+void read_ir_remote_control() {
+  if (ir_rx.decode(&results)) {
+    if (results.decode_type == NEC) {
+      Serial.print("NEC: ");
+    } else if (results.decode_type == SONY) {
+      Serial.print("SONY: ");
+    } else if (results.decode_type == RC5) {
+      Serial.print("RC5: ");
+    } else if (results.decode_type == RC6) {
+      Serial.print("RC6: ");
+    } else if (results.decode_type == UNKNOWN) {
+      Serial.print("UNKNOWN: ");
+    }
+    Serial.println(results.value, HEX);
+    switch(results.value){
+         // "special for mp3" remote control
+
+        case 0xFFA25D: // power
+          mode = mode_manual;
+          break;
+        case 0xFF629D: // mode
+          mode = mode_follow_closest;
+          break;
+        case 0xFFE21D: // mute
+          mode = mode_go_to_wall;
+          break;
+        case 0xFF22DD: // play/stop button
+          if(heading_command == 'F') {
+            heading_command = 'S';
+          } else {
+            heading_command = 'F';
+          }
+          break;
+        case 0xFF02FD: //  previous track
+          if(heading_command == 'L') {
+            heading_command = 'S';
+          } else {
+            heading_command = 'L';
+          }
+          break;
+        case 0xFFC23D: // next track
+          if(heading_command == 'R') {
+            heading_command = 'S';
+          } else {
+            heading_command = 'R';
+          }
+          break;
+        case 0xFFE01F: // eq
+          if(heading_command == 'B') {
+            heading_command = 'S';
+          } else {
+            heading_command = 'B';
+          }
+          break;
+        case 0xFFA857: // -
+          break;
+        case 0xFF906F: // +
+          break;
+        case 0xFF6897: // 0
+          break;
+        case 0xFF9867: // shuffle?
+          break;
+        case 0xFFB04F: // U/SD
+          break;
+        case 0xFF30CF: // 1
+          break;
+        case 0xFF18E7: // 2
+          break;
+        case 0xFF7A85: // 3
+          break;
+        //case 0x: // 4 doesn't work
+        //  break;
+        case 0xFF38C7: // 5
+          break;
+        case 0xFF5AA5: // 6
+          break;
+        case 0xFF42BD: // 7
+          break;
+        case 0xFF4AB5: // 8
+          break;
+        case 0xFF52AD: // 9
+          break;
+        case 0xFFFFFFFF: // repeat
+          break;
+          
+        default:
+          break;
+    }
+    
+    ir_rx.resume(); // Receive the next value
+  }
+  read_remote_control();
+
+}
+
 // returns true if loop time passes through n ms boundary
 bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
   return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
@@ -375,14 +482,23 @@ void loop() {
   bool every_100_ms = every_n_ms(last_loop_ms, loop_ms, 100);
   bool every_10_ms = every_n_ms(last_loop_ms, loop_ms, 10);
 
-  read_remote_control();
+
   if(every_10_ms) {
     read_remote_control();
-    if(front_lights_on) {
-      coast();
-      follow_closest();
-    } else {
-      follow_remote_control_commands();
+    read_ir_remote_control();
+    switch(mode) {
+      case mode_manual:
+        follow_remote_control_commands();
+        break;
+      case mode_follow_closest:
+        follow_closest();
+        break;
+      case mode_go_to_wall:
+        go_to_wall();
+        break;
+      default:
+        Serial.print("error: invalid mode");
+        break;
     }
   }
   last_loop_ms = loop_ms;
