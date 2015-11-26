@@ -31,7 +31,6 @@ int desired_heading = 0;
 char heading_command = 'S'; // stop all
 unsigned long last_loop_ms = 0;
 
-// using headlights command from car_rc app to turn MPU on and off
 bool front_lights_on = false;
 bool back_lights_on = false;
 bool horn_on = false;
@@ -49,8 +48,13 @@ enum mode_enum {
 
 
 void set_speed() {
-  analogWrite(pin_mcc_ena, speed);
-  analogWrite(pin_mcc_enb, speed);
+  if(speed < 255) {
+    analogWrite(pin_mcc_ena, speed);
+    analogWrite(pin_mcc_enb, speed);
+  } else {
+    digitalWrite(pin_mcc_ena, 1);
+    digitalWrite(pin_mcc_enb, 1);
+  }
 }
 
 
@@ -83,7 +87,6 @@ void set_servo_angle(int degrees) {
 }
 
 void trace(String s) {
-  return;
   Serial.println(s);
 }
 
@@ -109,30 +112,35 @@ double ping_distance() {
    unsigned long timeout_us = 20000;
    double duration = pulseIn(pin_ping_echo, HIGH, timeout_us);
    double distance = (duration/2) / 29.1/2.54;
-//   trace((String)"ping distance: "+distance);
+   trace((String)"ping distance: "+distance);
+   
+   // see post #16 at http://forum.arduino.cc/index.php?topic=55119.15
+   if(distance == 0) {
+      pinMode(pin_ping_echo, OUTPUT);
+      digitalWrite(pin_ping_echo, LOW);
+      delay(10);
+      pinMode(pin_ping_echo, INPUT);
+   }
+   
    return distance;
 }
 
 void go_to_wall() {
   set_servo_angle(0);
-  delay(60);
-  while(true) {
-    coast();
-    delay(60);
-    double distance = ping_distance();
-    
-    if (distance>18) { 
-      forward();
-    } else if (distance<16) {  
-      reverse();
-    }
-    else {
-      stop();
-      break;
-    }
-    delay(60); // go forward a little and also wait for ping to settle
-    coast();   // have to be coasting when we do the next ping because of noise
+  coast();
+  delay(20);
+  double distance = ping_distance();
+  
+  if (distance>18) { 
+    forward();
+  } else if (distance<16 && distance > 0) {  
+    reverse();
   }
+  else {
+    coast();
+  }
+  delay(60); // go forward a little and also wait for ping to settle
+  coast();   // have to be coasting when we do the next ping because of noise
 }
 
 void turn_to_angle(double angle) {
