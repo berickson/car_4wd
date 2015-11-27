@@ -59,7 +59,6 @@ void set_speed() {
 
 
 void setup() {
-  Serial.begin(9600);
 
   pinMode(pin_mcc_ena, OUTPUT);
   pinMode(pin_mcc_enb, OUTPUT);
@@ -67,6 +66,17 @@ void setup() {
   pinMode(pin_mcc_in2, OUTPUT);
   pinMode(pin_mcc_in3, OUTPUT);
   pinMode(pin_mcc_in4, OUTPUT);
+
+  digitalWrite(pin_mcc_ena, LOW);
+  digitalWrite(pin_mcc_enb, LOW);
+  digitalWrite(pin_mcc_in1, LOW);
+  digitalWrite(pin_mcc_in2, LOW);
+  digitalWrite(pin_mcc_in3, LOW);
+  digitalWrite(pin_mcc_in4, LOW);
+
+  Serial.begin(9600);
+
+  
   pinMode(pin_ping_trig, OUTPUT);
   pinMode(pin_ping_echo, INPUT);
 
@@ -127,8 +137,8 @@ double ping_distance() {
 
 void go_to_wall() {
   set_servo_angle(0);
-  coast();
-  delay(20);
+  //coast(); // have to be coasting when we do the next ping because of noise
+  delay(20); 
   double distance = ping_distance();
   
   if (distance>18) { 
@@ -140,7 +150,7 @@ void go_to_wall() {
     coast();
   }
   delay(60); // go forward a little and also wait for ping to settle
-  coast();   // have to be coasting when we do the next ping because of noise
+  //coast();   
 }
 
 void turn_to_angle(double angle) {
@@ -221,7 +231,7 @@ void turn_right() {
 
 void forward() {
   const double heading_tolerance = 3;
-  trace("forward");
+  //trace("forward");
   servo_forward();
   double heading_error = 0;
 
@@ -233,7 +243,7 @@ void forward() {
 }
 
 void reverse() {
-  trace("reverse");
+  //trace("reverse");
   digitalWrite(pin_left_forward, LOW);
   digitalWrite(pin_left_reverse, HIGH);
   digitalWrite(pin_right_forward, LOW);
@@ -242,7 +252,7 @@ void reverse() {
 
 
 void stop() {
-  trace("stop");
+  //trace("stop");
   digitalWrite(pin_left_forward, HIGH);
   digitalWrite(pin_left_reverse, HIGH);
   digitalWrite(pin_right_forward, HIGH);
@@ -250,7 +260,7 @@ void stop() {
 }
 
 void coast() {
-  trace("coast");
+  //trace("coast");
   digitalWrite(pin_left_forward, LOW);
   digitalWrite(pin_left_reverse, LOW);
   digitalWrite(pin_right_forward, LOW);
@@ -264,23 +274,28 @@ void read_remote_control() {
     switch(key) {
       case 'F':       // forward
         heading_command = key;
+        mode = mode_manual;
         break;
       case 'B':       // back
         heading_command = key;
+        mode = mode_manual;
         break;
       case 'L':       // left
       case 'G':       // forward left
       case 'H':       // back left
         heading_command = key;
+        mode = mode_manual;
         break;
       case 'R':       // right
       case 'I':       // forward right
       case 'J':       // back right
         heading_command = key;
+        mode = mode_manual;
         break;
       case 'S':       // stop
       case 'D':       // stop all
         heading_command = key;
+        mode = mode_manual;
         stop();
         break;
       case '0':  // speeds, 0% - 90%
@@ -337,9 +352,11 @@ void read_remote_control() {
         break;
       case 'U':
         back_lights_on = true;
+        mode = mode_go_to_wall;
         break;
       case 'u':
         back_lights_on = false;
+        mode = mode_manual;
         break;
       case 'V':
         horn_on = true;
