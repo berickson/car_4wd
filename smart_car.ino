@@ -1,5 +1,11 @@
+/*
+Board:      Arduino Uno
+Programmer: USB Asp
+*/
+
 #include <IRremote.h>
 #include <Servo.h>
+#include <FlexiTimer2.h>
 
 const int pin_mcu_int = 2;
 const int pin_mcc_enb = 3;
@@ -21,6 +27,9 @@ const int pin_left_reverse = pin_mcc_in1;
 const int pin_right_forward = pin_mcc_in4;
 const int pin_right_reverse = pin_mcc_in3;
 
+const int pin_right_encoder = A5;
+const int pin_left_encoder = A0;
+
 
 // globals
 Servo servo;
@@ -30,11 +39,17 @@ int speed = 255; // 0-255
 int desired_heading = 0;
 char heading_command = 'S'; // stop all
 unsigned long last_loop_ms = 0;
+unsigned long last_ping_start_ms = 0;
 
 bool front_lights_on = false;
 bool back_lights_on = false;
 bool horn_on = false;
 bool extra_on = false;
+
+volatile unsigned long right_encoder_count;
+volatile unsigned long left_encoder_count;
+volatile int right_encoder_value;
+volatile int left_encoder_value;
 
 
 // infrared receiver
@@ -43,7 +58,8 @@ decode_results results;
 enum mode_enum {
   mode_manual,
   mode_follow_closest,
-  mode_go_to_wall
+  mode_go_to_wall,
+  mode_back_and_forth
 } mode;
 
 
@@ -57,22 +73,41 @@ void set_speed() {
   }
 }
 
+void timer_interrupt_handler() {
+  int new_right_encoder_value = digitalRead(pin_right_encoder);
+  if(right_encoder_value != new_right_encoder_value) {
+    right_encoder_count++;
+    right_encoder_value = new_right_encoder_value;
+  }
+  int new_left_encoder_value = digitalRead(pin_left_encoder);
+  if(left_encoder_value != new_left_encoder_value) {
+    left_encoder_count++;
+    left_encoder_value = new_left_encoder_value;
+  }
+ 
+}
+
+
+// these functions set digital high and low for MCCC
+// this is special because of the MCC pullup resistors
+// that wants high impedance to set a TRUE value
+void mcc_high(int pin) {
+  pinMode(pin, INPUT);
+}
+
+void mcc_low(int pin) {
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, LOW);
+}
+
 
 void setup() {
-
-  pinMode(pin_mcc_ena, OUTPUT);
-  pinMode(pin_mcc_enb, OUTPUT);
-  pinMode(pin_mcc_in1, OUTPUT);
-  pinMode(pin_mcc_in2, OUTPUT);
-  pinMode(pin_mcc_in3, OUTPUT);
-  pinMode(pin_mcc_in4, OUTPUT);
-
-  digitalWrite(pin_mcc_ena, LOW);
-  digitalWrite(pin_mcc_enb, LOW);
-  digitalWrite(pin_mcc_in1, LOW);
-  digitalWrite(pin_mcc_in2, LOW);
-  digitalWrite(pin_mcc_in3, LOW);
-  digitalWrite(pin_mcc_in4, LOW);
+  mcc_high(pin_mcc_ena);
+  mcc_high(pin_mcc_enb);
+  mcc_high(pin_mcc_in1);
+  mcc_high(pin_mcc_in2);
+  mcc_high(pin_mcc_in3);
+  mcc_high(pin_mcc_in4);
 
   Serial.begin(9600);
 
@@ -83,15 +118,21 @@ void setup() {
   set_speed();
   
   servo.attach(pin_servo);
+  
+  const int timer_us = 1000;
+  FlexiTimer2::set(1, timer_interrupt_handler); // 1ms period
+  FlexiTimer2::start();
+  servo_forward();
+  
 
-  ir_rx.enableIRIn(); // Start the receiver
+  // ir_rx.enableIRIn(); // Start the receiver
 }
 
 // set servo to angle, zero is center, negative is ccw, range is -60 to 60
 void set_servo_angle(int degrees) {
   const int center = 1350;
   const int range = 900; // range from center to extreme
-  
+
   servo.writeMicroseconds(
     center + range* degrees / 90);
 }
@@ -114,6 +155,12 @@ void servo_right() {
 
 
 double ping_distance() {
+   // wait for previous ping to settle
+   const unsigned long min_time_between_pings_ms = 30;
+   while(millis() - last_ping_start_ms < min_time_between_pings_ms) {
+     delay(1);
+   }
+   last_ping_start_ms = millis();
    digitalWrite(pin_ping_trig, LOW);
    delayMicroseconds(2);
    digitalWrite(pin_ping_trig, HIGH);
@@ -137,7 +184,6 @@ double ping_distance() {
 
 void go_to_wall() {
   set_servo_angle(0);
-  //coast(); // have to be coasting when we do the next ping because of noise
   delay(20); 
   double distance = ping_distance();
   
@@ -149,8 +195,6 @@ void go_to_wall() {
   else {
     coast();
   }
-  delay(60); // go forward a little and also wait for ping to settle
-  //coast();   
 }
 
 void turn_to_angle(double angle) {
@@ -169,9 +213,11 @@ void turn_to_angle(double angle) {
 bool scan_for_closest(double * min_angle, double * min_distance) {
   trace("scanning for closest");
   bool found = false;
+  set_servo_angle(90);
+  delay(300);
   for(double angle = 90; angle >= -90; angle -=15) {
     set_servo_angle(angle);
-    delay(300);
+    delay(300); // going much faster messes with the ping results
     double distance = ping_distance();
     if((!found || (distance < *min_distance)) && distance > 0) {
       found = true;
@@ -186,17 +232,23 @@ bool scan_for_closest(double * min_angle, double * min_distance) {
 }
 
 void go_inches(double inches) {
-  double ms_per_inch = 50;
-  if(inches > 0)
+  go_ticks(inches * 5.52); 
+}
+
+void go_ticks(int ticks) {
+  int original_ticks = right_encoder_count;
+  if(ticks >= 0) {
     forward();
-  else
+  } else {
     reverse();
-  delay(abs(inches) * ms_per_inch);
-  coast();
+  }
+  while(abs(right_encoder_count - original_ticks) < abs(ticks)) {
+    delay(1);
+  }
+  stop();
 }
 
 void follow_closest() {
-  delay(100);
   coast();
   double angle = 0;
   double distance = 0;
@@ -211,60 +263,54 @@ void follow_closest() {
 
 
 void turn_left() {
-  trace("left");
   servo_left();
-  digitalWrite(pin_left_forward, LOW);
-  digitalWrite(pin_left_reverse, HIGH);
-  digitalWrite(pin_right_forward, HIGH);
-  digitalWrite(pin_right_reverse, LOW);
+  mcc_low(pin_left_forward);
+  mcc_high(pin_left_reverse);
+  mcc_high(pin_right_forward);
+  mcc_low(pin_right_reverse);
 }
 
 void turn_right() {
-  trace("right");
   servo_right();
-  digitalWrite(pin_left_forward, HIGH);
-  digitalWrite(pin_left_reverse, LOW);
-  digitalWrite(pin_right_forward, LOW);
-  digitalWrite(pin_right_reverse, HIGH);
+  mcc_high(pin_left_forward);
+  mcc_low(pin_left_reverse);
+  mcc_low(pin_right_forward);
+  mcc_high(pin_right_reverse);
 }
 
 
 void forward() {
   const double heading_tolerance = 3;
-  //trace("forward");
   servo_forward();
   double heading_error = 0;
 
-  digitalWrite(pin_left_forward, HIGH);
-  digitalWrite(pin_left_reverse, LOW);
+  mcc_high(pin_left_forward);
+  mcc_low(pin_left_reverse);
 
-  digitalWrite(pin_right_forward, HIGH);
-  digitalWrite(pin_right_reverse, LOW);
+  mcc_high(pin_right_forward);
+  mcc_low(pin_right_reverse);
 }
 
 void reverse() {
-  //trace("reverse");
-  digitalWrite(pin_left_forward, LOW);
-  digitalWrite(pin_left_reverse, HIGH);
-  digitalWrite(pin_right_forward, LOW);
-  digitalWrite(pin_right_reverse, HIGH);
+  mcc_low(pin_left_forward);
+  mcc_high(pin_left_reverse);
+  mcc_low(pin_right_forward);
+  mcc_high(pin_right_reverse);
 }
 
 
 void stop() {
-  //trace("stop");
-  digitalWrite(pin_left_forward, HIGH);
-  digitalWrite(pin_left_reverse, HIGH);
-  digitalWrite(pin_right_forward, HIGH);
-  digitalWrite(pin_right_reverse, HIGH);
+  mcc_high(pin_left_forward);
+  mcc_high(pin_left_reverse);
+  mcc_high(pin_right_forward);
+  mcc_high(pin_right_reverse);
 }
 
 void coast() {
-  //trace("coast");
-  digitalWrite(pin_left_forward, LOW);
-  digitalWrite(pin_left_reverse, LOW);
-  digitalWrite(pin_right_forward, LOW);
-  digitalWrite(pin_right_reverse, LOW);
+  mcc_low(pin_left_forward);
+  mcc_low(pin_left_reverse);
+  mcc_low(pin_right_forward);
+  mcc_low(pin_right_reverse);
 }
 
 
@@ -360,9 +406,11 @@ void read_remote_control() {
         break;
       case 'V':
         horn_on = true;
+        mode = mode_back_and_forth;
         break;
       case 'v':
         horn_on = false;
+        mode = mode_manual;
         break;
       case 'X':
         extra_on = true;
@@ -421,6 +469,7 @@ void read_ir_remote_control() {
 
         case 0xFFA25D: // power
           mode = mode_manual;
+          heading_command = 'S';
           break;
         case 0xFF629D: // mode
           mode = mode_follow_closest;
@@ -497,12 +546,22 @@ void read_ir_remote_control() {
 
 }
 
+
+void go_back_and_forth() {
+    delay(5000);
+    go_inches(12);
+    delay(5000);
+    go_inches(-12);
+}
+
 // returns true if loop time passes through n ms boundary
 bool every_n_ms(unsigned long last_loop_ms, unsigned long loop_ms, unsigned long ms) {
   return (last_loop_ms % ms) + (loop_ms - last_loop_ms) >= ms;
 
 }
 
+int last_reported_right_encoder_count = 0;
+int last_reported_left_encoder_count = 0;
 void loop() {
   unsigned long loop_ms = millis();
   bool every_second = every_n_ms(last_loop_ms, loop_ms, 1000);
@@ -523,10 +582,29 @@ void loop() {
       case mode_go_to_wall:
         go_to_wall();
         break;
+      case mode_back_and_forth:
+        go_back_and_forth();
+        break;
       default:
         Serial.print("error: invalid mode");
         break;
     }
   }
+  if(every_second) {
+    Serial.print("ping: ");
+    Serial.print(ping_distance());
+    Serial.print("right: ");
+    Serial.print(right_encoder_count);
+    Serial.print(", ");
+    Serial.print(right_encoder_count - last_reported_right_encoder_count);
+    last_reported_right_encoder_count = right_encoder_count;
+    Serial.print("  left: ");
+    Serial.print(left_encoder_count);
+    Serial.print(", ");
+    Serial.println(left_encoder_count - last_reported_left_encoder_count);
+    last_reported_left_encoder_count = left_encoder_count;
+  }
+
+
   last_loop_ms = loop_ms;
 }
