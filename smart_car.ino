@@ -35,7 +35,7 @@ const int pin_left_encoder = A0;
 Servo servo;
 IRrecv ir_rx(pin_ir_rx);
 decode_results ir_results;
-int speed = 255; // 0-255
+int speed = 10; // 0-10
 int desired_heading = 0;
 char heading_command = 'S'; // stop all
 unsigned long last_loop_ms = 0;
@@ -63,14 +63,8 @@ enum mode_enum {
 } mode;
 
 
-void set_speed() {
-  if(speed < 255) {
-    analogWrite(pin_mcc_ena, speed);
-    analogWrite(pin_mcc_enb, speed);
-  } else {
-    digitalWrite(pin_mcc_ena, 1);
-    digitalWrite(pin_mcc_enb, 1);
-  }
+void set_speed(int new_speed) {
+  speed = constrain(new_speed,0,10); // 0-10 speed will be used in timer function to throttle speed
 }
 
 void timer_interrupt_handler() {
@@ -83,6 +77,20 @@ void timer_interrupt_handler() {
   if(left_encoder_value != new_left_encoder_value) {
     left_encoder_count++;
     left_encoder_value = new_left_encoder_value;
+  }
+  int error = right_encoder_count - left_encoder_count * 0.98; // adjust for different wheel sizes
+  if(error > 2) {
+    mcc_high(pin_mcc_ena);
+    mcc_low(pin_mcc_enb);
+  } else if (error < -2 ) {
+    mcc_low(pin_mcc_ena);
+    mcc_high(pin_mcc_enb);
+  } else if(millis() % 10 > speed) {
+    mcc_low(pin_mcc_ena);
+    mcc_low(pin_mcc_enb);
+  } else {
+    mcc_high(pin_mcc_ena);
+    mcc_high(pin_mcc_enb);
   }
  
 }
@@ -115,7 +123,7 @@ void setup() {
   pinMode(pin_ping_trig, OUTPUT);
   pinMode(pin_ping_echo, INPUT);
 
-  set_speed();
+  set_speed(10);
   
   servo.attach(pin_servo);
   
@@ -197,13 +205,17 @@ void go_to_wall() {
   }
 }
 
-void turn_to_angle(double angle) {
-  double ms_per_degree = 3.0;
+void turn_angle(double angle) {
+  int goal_ticks = right_encoder_count + left_encoder_count + abs(angle) * 0.9;
+
   if(angle > 0)
     turn_left();
   if(angle < 0)
     turn_right();
-  delay(abs(angle) * ms_per_degree);
+
+  while(left_encoder_count + right_encoder_count < goal_ticks) {
+    delay(1);
+  }
   stop();
   delay(100);
   coast();
@@ -255,7 +267,7 @@ void follow_closest() {
   double desired_distance = 5; // inches
   if(scan_for_closest(&angle, &distance)) {
     set_servo_angle(angle);
-    turn_to_angle(angle);
+    turn_angle(angle);
     set_servo_angle(0);
     go_inches(constrain(distance-desired_distance,-10,10));
   }
@@ -345,48 +357,37 @@ void read_remote_control() {
         stop();
         break;
       case '0':  // speeds, 0% - 90%
-        speed = (int) (255 * .0);
-        set_speed();
+        set_speed(0);
         break;
       case '1':
-        speed = (int) (255 * .1);
-        set_speed();
+        set_speed(1);
         break;
       case '2':
-        speed = (int) (255 * .2);
-        set_speed();
+        set_speed(2);
         break;
       case '3':
-        speed = (int) (255 * .3);
-        set_speed();
+        set_speed(3);
         break;
       case '4':
-        speed = (int) (255 * .4);
-        set_speed();
+        set_speed(4);
         break;
       case '5':
-        speed = (int) (255 * .5);
-        set_speed();
+        set_speed(5);
         break;
       case '6':
-        speed = (int) (255 * .6);
-        set_speed();
+        set_speed(6);
         break;
       case '7':
-        speed = (int) (255 * .7);
-        set_speed();
+        set_speed(7);
         break;
       case '8':
-        speed = (int) (255 * .8);
-        set_speed();
+        set_speed(8);
         break;
       case '9':
-        speed = (int) (255 * .9);
-        set_speed();
+        set_speed(9);
         break;
-      case 'q': // full speed
-        speed = 255;
-        set_speed();
+      case 'q': 
+        set_speed(10);
         break;
       case 'W':
         front_lights_on = true;
@@ -548,10 +549,16 @@ void read_ir_remote_control() {
 
 
 void go_back_and_forth() {
-    delay(5000);
     go_inches(12);
-    delay(5000);
+    delay(3000);
+    turn_angle(-90);
+    delay(3000);
+    turn_angle(180);
+    delay(3000);
+    turn_angle(-90);
+    delay(3000);
     go_inches(-12);
+    delay(3000);
 }
 
 // returns true if loop time passes through n ms boundary
