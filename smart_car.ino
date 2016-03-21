@@ -6,6 +6,7 @@ Programmer: USB Asp
 #include <IRremote.h>
 #include <Servo.h>
 #include <FlexiTimer2.h>
+#include "math.h"
 
 const int pin_mcu_int = 2;
 const int pin_mcc_enb = 3;
@@ -19,8 +20,9 @@ const int pin_ping_echo = 9;
 const int pin_ping_trig = 10;
 
 const int pin_servo = 11;
+const int pin_servo2 = 12;
 
-const int pin_ir_rx = 12;
+const int pin_ir_rx = 13;
 
 const int pin_left_forward = pin_mcc_in2;
 const int pin_left_reverse = pin_mcc_in1;
@@ -33,6 +35,7 @@ const int pin_left_encoder = A0;
 
 // globals
 Servo servo;
+Servo servo2;
 IRrecv ir_rx(pin_ir_rx);
 decode_results ir_results;
 int speed = 10; // 0-10
@@ -59,7 +62,8 @@ enum mode_enum {
   mode_manual,
   mode_follow_closest,
   mode_go_to_wall,
-  mode_back_and_forth
+  mode_back_and_forth,
+  mode_follow_wall
 } mode;
 
 
@@ -126,14 +130,17 @@ void setup() {
   set_speed(10);
   
   servo.attach(pin_servo);
+  servo2.attach(pin_servo2);
   
   const int timer_us = 1000;
   FlexiTimer2::set(1, timer_interrupt_handler); // 1ms period
   FlexiTimer2::start();
   servo_forward();
+  set_servo2_angle(0);
   
 
   // ir_rx.enableIRIn(); // Start the receiver
+  mode = mode_manual;
 }
 
 // set servo to angle, zero is center, negative is ccw, range is -60 to 60
@@ -144,6 +151,17 @@ void set_servo_angle(int degrees) {
   servo.writeMicroseconds(
     center + range* degrees / 90);
 }
+
+// set servo to angle, zero is center, negative is down, range is -60 to 60
+void set_servo2_angle(int degrees) {
+  const int center = 1350;
+  const int range = 900; // range from center to extreme
+
+  servo2.writeMicroseconds(
+    center + range* degrees / 90);
+}
+
+
 
 void trace(String s) {
   Serial.println(s);
@@ -205,8 +223,29 @@ void go_to_wall() {
   }
 }
 
+
+void follow_wall() {
+  const int goal_distance = 5.0;
+  set_servo_angle(-90);
+  delay(1000);
+  double ds = 3;
+  double gap = ping_distance();
+  for(int i = 0; i < 10; i++) {
+    go_inches(ds);
+    delay(1000);
+    double new_gap = ping_distance();
+    double goal_theta = constrain(10 * (goal_distance-new_gap), -30,30);
+    double drift = new_gap-gap;
+    double theta = constrain(-asin(drift/ds)*180./PI,-30,30);
+    Serial.print((String) "gap: "+ gap + " new gap: " + new_gap + " drift: " + drift +"  theta: "+theta +"  goal_theta: "+goal_theta );
+    turn_angle(constrain(goal_theta-theta,-30,30));
+    gap = ping_distance();
+    delay(1000);
+  }
+}
+
 void turn_angle(double angle) {
-  int goal_ticks = right_encoder_count + left_encoder_count + abs(angle) * 0.9;
+  int goal_ticks = right_encoder_count + left_encoder_count + abs(angle) * 0.45;
 
   if(angle > 0)
     turn_left();
@@ -275,7 +314,7 @@ void follow_closest() {
 
 
 void turn_left() {
-  servo_left();
+  //servo_left();
   mcc_low(pin_left_forward);
   mcc_high(pin_left_reverse);
   mcc_high(pin_right_forward);
@@ -283,7 +322,7 @@ void turn_left() {
 }
 
 void turn_right() {
-  servo_right();
+  //servo_right();
   mcc_high(pin_left_forward);
   mcc_low(pin_left_reverse);
   mcc_low(pin_right_forward);
@@ -293,7 +332,7 @@ void turn_right() {
 
 void forward() {
   const double heading_tolerance = 3;
-  servo_forward();
+  //servo_forward();
   double heading_error = 0;
 
   mcc_high(pin_left_forward);
@@ -414,10 +453,12 @@ void read_remote_control() {
         mode = mode_manual;
         break;
       case 'X':
+        mode = mode_follow_wall;
         extra_on = true;
         break;
       case 'x':
         extra_on = false;
+        mode = mode_manual;
         break;
       default:
         break;
@@ -591,6 +632,9 @@ void loop() {
         break;
       case mode_back_and_forth:
         go_back_and_forth();
+        break;
+      case mode_follow_wall:
+        follow_wall();
         break;
       default:
         Serial.print("error: invalid mode");
