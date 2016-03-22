@@ -6,6 +6,14 @@ Programmer: USB Asp
 #include <IRremote.h>
 #include <Servo.h>
 #include <FlexiTimer2.h>
+#include<SoftwareSerial.h>
+SoftwareSerial BT(A3, A4); 
+// creates a "virtual" serial port/UART
+// connect BT module TX to A3
+// connect BT module RX to A4
+// connect BT Vcc to 5V, GND to GND
+
+
 #include "math.h"
 
 const int pin_mcu_int = 2;
@@ -122,6 +130,7 @@ void setup() {
   mcc_high(pin_mcc_in4);
 
   Serial.begin(9600);
+  BT.begin(9600);
 
   
   pinMode(pin_ping_trig, OUTPUT);
@@ -366,8 +375,8 @@ void coast() {
 
 
 void read_remote_control() {
-  if (Serial.available() > 0) {
-    int key = Serial.read();
+  if (BT.available() > 0) {
+    int key = BT.read();
     switch(key) {
       case 'F':       // forward
         heading_command = key;
