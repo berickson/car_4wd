@@ -7,11 +7,6 @@ Programmer: USB Asp
 #include <Servo.h>
 #include <FlexiTimer2.h>
 #include<SoftwareSerial.h>
-SoftwareSerial BT(A3, A4); 
-// creates a "virtual" serial port/UART
-// connect BT module TX to A3
-// connect BT module RX to A4
-// connect BT Vcc to 5V, GND to GND
 
 
 #include "math.h"
@@ -37,6 +32,10 @@ const int pin_left_reverse = pin_mcc_in1;
 const int pin_right_forward = pin_mcc_in4;
 const int pin_right_reverse = pin_mcc_in3;
 
+
+const int pin_bluetooth_tx = A3;
+const int pin_bluetooth_rx = A4;
+
 const int pin_right_encoder = A5;
 const int pin_left_encoder = A0;
 
@@ -46,6 +45,8 @@ Servo servo;
 Servo servo2;
 IRrecv ir_rx(pin_ir_rx);
 decode_results ir_results;
+SoftwareSerial bluetooth(pin_bluetooth_tx, pin_bluetooth_rx); 
+
 int speed = 10; // 0-10
 int desired_heading = 0;
 char heading_command = 'S'; // stop all
@@ -130,7 +131,7 @@ void setup() {
   mcc_high(pin_mcc_in4);
 
   Serial.begin(9600);
-  BT.begin(9600);
+  bluetooth.begin(9600);
 
   
   pinMode(pin_ping_trig, OUTPUT);
@@ -375,8 +376,8 @@ void coast() {
 
 
 void read_remote_control() {
-  if (BT.available() > 0) {
-    int key = BT.read();
+  if (bluetooth.available() > 0) {
+    int key = bluetooth.read();
     switch(key) {
       case 'F':       // forward
         heading_command = key;
